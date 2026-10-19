@@ -7,8 +7,26 @@
             <h1>Books worth<br>returning to.</h1>
             <p class="hero-copy">Keep the ideas, passages, and recommendations that stay with you.</p>
         </div>
-        <a class="button button-primary" href="/new-book">Add a book <span aria-hidden="true">+</span></a>
+        <div class="hero-actions">
+            <a class="button button-primary" href="/new-book">
+                Add a book <span aria-hidden="true">+</span>
+            </a>
+            <button class="button button-primary nebressca-button" id="recommend-button" type="button">
+                Ask Nebressca AI<span aria-hidden="true">✦</span>
+            </button>
+        </div>
     </div>
+</section>
+
+<section class="assistant-panel" id="assistant-panel" hidden>
+    <p class="eyebrow">Shelf Assistant</p>
+    <h3>Your next read</h3>
+    <p id="recommendation-status">Thinking about your shelf…</p>
+    <div id="recommendation-result"></div>
+
+    <button class="note-action" id="hide-recommendations" type="button">
+        Hide recommendations
+    </button>
 </section>
 
 <section class="library" aria-labelledby="library-title">

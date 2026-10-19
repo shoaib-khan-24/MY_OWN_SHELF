@@ -1,15 +1,20 @@
 import express from "express";
 import pg from "pg";
-import axios from "axios";
 import bodyParser from "body-parser";
 import env from "dotenv";
 
 import bcrypt from 'bcrypt';
 import session from "express-session";
 
-const app = new express();
-const port = 3000;
+import { GoogleGenAI } from "@google/genai";
+
 env.config();
+
+const app = new express();
+const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
+});
+const port = 3000;
 
 // connecting to database
 
@@ -34,7 +39,8 @@ app.use(session({
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        secure: false
+        secure: false,
+        maxAge: 1000 * 60 * 60,
     }
 }));
 
@@ -62,10 +68,24 @@ async function get_all_books(userId){
     }catch(error){
         console.log(error);
     }
-    
 };
 
 // Routes
+
+// app.get("/ai-test", async (req, res) => {
+//     try{
+//         const response = await ai.models.generateContent({
+//             model: "gemini-3.6-flash",
+//             contents: "Reply with exactly: Gemini connection works.",
+//             // contents: "Name one fruit."
+//         });
+
+//         res.status(500).send(response.text);
+//     }catch(error){
+//         console.log(error);
+//         res.send("AI not working.");
+//     }
+// });
 
 app.get("/", loginRequired, async (req, res) => {
     try{
@@ -214,7 +234,7 @@ app.post("/signup", async (req, res) => {
     }catch(error){
         if (error.code === "23505") {
             req.session.authError = "An account with this email already exists.";
-            return res.redirect("/signup");
+            return res.redirect("/login");
         }
         console.log(error);
         res.send("Could not sign up the user.");
@@ -268,6 +288,60 @@ app.post("/logout", (req, res) => {
         }
         res.redirect("/login");
     });
+});
+
+// Gemini AI for recommendations
+
+app.post("/recommendations", loginRequired, async (req, res) => {
+    try {
+        const result = await db.query(
+            "SELECT title, author, recommendation, description FROM book WHERE user_id = $1 ORDER BY book_date DESC;",
+            [req.session.userId]
+        );
+
+        const books = result.rows;
+
+        if (books.length === 0) {
+            return res.status(400).json({
+                error: "Add at least one book before asking for recommendations."
+            });
+        }
+
+        const shelf = books
+            .map((book) =>
+                `- ${book.title} by ${book.author}` +
+                (book.recommendation ? ` (rating: ${book.recommendation}/10)` : "")
+            )
+            .join("\n");
+
+        const prompt = `You are a thoughtful book-recommendation assistant.
+
+                        Here is the user's reading shelf:
+                        ${shelf}
+
+                        Recommend exactly 3 books that are not already on this shelf.
+
+                        For each recommendation, use this exact format:
+                        S.no.) Book Title — Author (One short sentence explaining why it fits the reader.)
+                        
+
+                        Keep each explanation under 20 words.
+                        Do not add an introduction or conclusion.`;
+                        
+        const response = await ai.models.generateContent({
+            model: "gemini-3.6-flash",
+            contents: prompt
+        });
+
+        res.json({
+            recommendation: response.text
+        });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({
+            error: "AI assistant Nebressca is busy right now. Please try again in a moment."
+        });
+    }
 });
 
 app.listen(port, () => {

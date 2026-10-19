@@ -15,7 +15,7 @@
         <a class="brand" href="/" aria-label="Shelf Notes home">MyOwn<span>Shelf</span></a>
         <nav aria-label="Main navigation">
             <% if (userId) { %>
-                <span>Hi, <%= userName %></span>
+                <span class="username">Hi, <%= userName[0].toUpperCase()+userName.slice(1) %></span>
                 <a href="/">Library</a>
                 <a class="button button-small" href="/new-book">
                     Add a book <span aria-hidden="true">+</span>
