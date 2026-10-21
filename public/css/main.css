@@ -57,6 +57,7 @@ nav { display:flex; align-items:center; gap:24px; font-size:12px; font-weight:70
 #recommendation-result {
     margin-top: 24px;
     padding-top: 24px;
+    padding-bottom: 14px;
     border-top: 1px solid var(--line);
     white-space: pre-wrap;
     font: 400 15px/1.7 Fraunces, Georgia, serif;

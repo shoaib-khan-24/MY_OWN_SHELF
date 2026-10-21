@@ -14,7 +14,7 @@ const app = new express();
 const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY
 });
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // connecting to database
 
@@ -77,7 +77,6 @@ async function get_all_books(userId){
 //         const response = await ai.models.generateContent({
 //             model: "gemini-3.6-flash",
 //             contents: "Reply with exactly: Gemini connection works.",
-//             // contents: "Name one fruit."
 //         });
 
 //         res.status(500).send(response.text);
