@@ -1,6 +1,5 @@
 import express from "express";
 import pg from "pg";
-import bodyParser from "body-parser";
 import env from "dotenv";
 
 import bcrypt from 'bcrypt';
@@ -15,6 +14,10 @@ const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY
 });
 const port = process.env.PORT || 3000;
+
+if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+}
 
 // connecting to database
 
@@ -31,15 +34,18 @@ db.connect();
 
 app.use(express.static("public"));
 
-app.use(bodyParser.urlencoded({extended:true}));
+app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
     secret: process.env.SESSION_SECRET,
+    name: "shelf.sid",
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
         httpOnly: true,
-        secure: false,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
         maxAge: 1000 * 60 * 60,
     }
 }));
@@ -54,9 +60,33 @@ app.use((req, res, next) => {
 
 function loginRequired(req, res, next) {
     if (!req.session.userId) {
+        if (req.get("accept")?.includes("application/json")) {
+            return res.status(401).json({ error: "Your session expired. Please log in again." });
+        }
         return res.redirect("/login");
     }
     next();
+}
+
+function createAuthenticatedSession(req, res, user) {
+    req.session.regenerate((regenerateError) => {
+        if (regenerateError) {
+            console.log(regenerateError);
+            return res.status(500).send("Could not start a secure session.");
+        }
+
+        req.session.userId = user.id;
+        req.session.userName = user.name;
+
+        req.session.save((saveError) => {
+            if (saveError) {
+                console.log(saveError);
+                return res.status(500).send("Could not save your session.");
+            }
+
+            res.redirect("/");
+        });
+    });
 }
 
 //functions
@@ -71,20 +101,6 @@ async function get_all_books(userId){
 };
 
 // Routes
-
-// app.get("/ai-test", async (req, res) => {
-//     try{
-//         const response = await ai.models.generateContent({
-//             model: "gemini-3.6-flash",
-//             contents: "Reply with exactly: Gemini connection works.",
-//         });
-
-//         res.status(500).send(response.text);
-//     }catch(error){
-//         console.log(error);
-//         res.send("AI not working.");
-//     }
-// });
 
 app.get("/", loginRequired, async (req, res) => {
     try{
@@ -137,7 +153,7 @@ app.get("/note/:id", loginRequired, async (req, res) => {
     }
 });
 
-app.get("/delete-book/:id", loginRequired, async (req, res) => {
+app.delete("/delete-book/:id", loginRequired, async (req, res) => {
     const bookId = req.params.id;
     try{
         const result = await db.query(
@@ -146,13 +162,13 @@ app.get("/delete-book/:id", loginRequired, async (req, res) => {
         );
 
         if(result.rowCount === 0){
-            return res.send("Could not find book to delete");
+            return res.status(404).json({ error: "Book not found." });
         }
 
-        res.redirect("/");
+        res.status(200).json({ message: "Book deleted." });
     }catch(error){
         console.log(error);
-        res.send("Book could not be deleted.");
+        res.status(500).json({ error: "Book could not be deleted." });
     }
 });
 
@@ -196,16 +212,22 @@ app.patch("/edit-note/:id", loginRequired, async (req, res) => {
     }
 });
 
-app.get("/delete-note/:id", loginRequired, async (req, res) => {
+app.delete("/delete-note/:id", loginRequired, async (req, res) => {
     const noteId = req.params.id;
     try{
         const result = await db.query(
-            "DELETE FROM note WHERE id = $1 RETURNING book_id;",
-            [noteId]
-        );    
-        res.redirect(`/note/${result.rows[0].book_id}`);
+            "DELETE FROM note WHERE id = $1 AND book_id IN (SELECT id FROM book WHERE user_id = $2) RETURNING book_id;",
+            [noteId, req.session.userId]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: "Note not found." });
+        }
+
+        res.status(200).json({ message: "Note deleted." });
     }catch(error){
-        res.send("Could not delete the note.")
+        console.log(error);
+        res.status(500).json({ error: "Note could not be deleted." });
     }
 });
 
@@ -219,21 +241,30 @@ app.get("/signup", (req, res) => {
 
 app.post("/signup", async (req, res) => {
     const {name, email, password} = req.body;
+    const normalizedName = name?.trim();
+    const normalizedEmail = email?.trim().toLowerCase();
+
+    if (!normalizedName || !normalizedEmail || !password) {
+        req.session.authError = "Name, email, and password are required.";
+        return res.redirect("/signup");
+    }
+
+    if (password.length < 8) {
+        req.session.authError = "Password must be at least 8 characters.";
+        return res.redirect("/signup");
+    }
 
     try{
         const hashed_password = await bcrypt.hash(password, 12);
         const result = await db.query(
             "INSERT INTO users (name, email, password_hash) VALUES ($1,$2,$3) returning id, name;",
-            [name, email, hashed_password]
+            [normalizedName, normalizedEmail, hashed_password]
         )
-        req.session.userId = result.rows[0].id;
-        req.session.userName = result.rows[0].name;
-
-        res.redirect("/");
+        createAuthenticatedSession(req, res, result.rows[0]);
     }catch(error){
         if (error.code === "23505") {
             req.session.authError = "An account with this email already exists.";
-            return res.redirect("/login");
+            return res.redirect("/signup");
         }
         console.log(error);
         res.send("Could not sign up the user.");
@@ -249,16 +280,17 @@ app.get("/login", (req, res) => {
 
 app.post("/login", async (req, res) => {
     const {email, password} = req.body;
+    const normalizedEmail = email?.trim().toLowerCase();
 
     try{
         const result = await db.query(
             "SELECT * FROM users WHERE email = $1;",
-            [email]
+            [normalizedEmail]
         )
         const user = result.rows[0];
 
         if(!user){
-            req.session.authError = "Invalid Email!";
+            req.session.authError = "Invalid email or password.";
             return res.redirect("/login");
         }
 
@@ -266,14 +298,11 @@ app.post("/login", async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password_hash);
         
         if(!isMatch){
-            req.session.authError = "Wrong Password!";
+            req.session.authError = "Invalid email or password.";
             return res.redirect("/login");
         }
 
-        req.session.userId = user.id;
-        req.session.userName = user.name;
-
-        res.redirect("/");
+        createAuthenticatedSession(req, res, user);
     }catch(error){
         console.log(error);
         res.send("Could not login the user");
@@ -294,7 +323,7 @@ app.post("/logout", (req, res) => {
 app.post("/recommendations", loginRequired, async (req, res) => {
     try {
         const result = await db.query(
-            "SELECT title, author, recommendation, description FROM book WHERE user_id = $1 ORDER BY book_date DESC;",
+            "SELECT title, author, recommendation FROM book WHERE user_id = $1 ORDER BY book_date DESC;",
             [req.session.userId]
         );
 
@@ -328,7 +357,8 @@ app.post("/recommendations", loginRequired, async (req, res) => {
                         Do not add an introduction or conclusion.`;
                         
         const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            // model: "gemini-3.6-flash",
+            model: "gemini-3.5-flash-lite",
             contents: prompt
         });
 

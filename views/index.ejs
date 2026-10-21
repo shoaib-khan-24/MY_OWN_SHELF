@@ -54,7 +54,7 @@
                             <% if (book.recommendation) { %><p class="recommendation">Recommend it: <%= book.recommendation %>/10</p><% } %>
                         </div>
                     </a>
-                    <a href="/delete-book/<%= book.id %>"><button class="delete-book" type="button">Delete book</button></a>
+                    <button class="delete-book" type="button" data-book-id="<%= book.id %>" data-book-title="<%= book.title %>">Delete book</button>
                 </div>
             <% }) %>
         </div>

@@ -32,7 +32,7 @@
                         <p class="note-text"><%= note.note_text %></p>
                         <div class="note-actions">
                             <button style="padding-top: 2px;" class="note-action" type="button" data-edit-note-id="<%= note.id %>" data-edit-note-text="<%= note.note_text %>">Edit</button>
-                            <a href="/delete-note/<%= note.id %>"><button class="note-action" type="button" style="color: rgb(227, 110, 110);">Delete</button></a>
+                            <button class="note-action note-action-delete" type="button" data-note-id="<%= note.id %>">Delete</button>
                         </div>
                     </div>
                 </article>
